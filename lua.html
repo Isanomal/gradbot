@@ -1,0 +1,31 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Wasmoon in the Browser</title>
+</head>
+<body>
+    <h1>Wasmoon in the Browser</h1>
+
+    <textarea id="luaCode" rows="10" cols="50"></textarea>
+    <button onclick="executeLua()">Run Lua Code</button>
+
+    <div id="output"></div>
+
+    <script>
+        async function executeLua() {
+            const luaCode = document.getElementById('luaCode').value;
+
+            // Load the Wasmoon WebAssembly module
+            const wasmoonModule = await WebAssembly.instantiateStreaming(fetch('wasmoon.wasm'));
+
+            // Run Lua code using Wasmoon
+            const result = wasmoonModule.instance.exports.run(luaCode);
+
+            // Display the result
+            document.getElementById('output').innerText = result;
+        }
+    </script>
+</body>
+</html>
