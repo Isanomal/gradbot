@@ -221,9 +221,18 @@ var robotFun;
  * Run the user robot's code.
  * @param {*} source 
  */
-function runRobot(source) {
+async function runRobot(source) {
+    console.log('Source object:', source); // Log the source object
+    if (!source || !source.parts) {
+        console.error("Invalid robot source data: Missing parts array");
+        return;
+    }
+
     robot = new Chassis(source);
-    robotFun = getRobotFunction(robot);
+    robotFun = await getRobotFunction(robot);
+
+    console.log('Checking robotFun');
+    console.log(typeof robotFun);
 
     robotFun(robot);
 }
@@ -232,20 +241,100 @@ function runRobot(source) {
 /**
  * Get the robot's code function.
  */
-function getRobotFunction(robot) {
-    var preamble = "";    
+async function getRobotFunction(robot) {
+    console.log('Creating getRobotFunction');
 
-    //reference all the robot variables
-    for(var i=0; i<robot.parts.length; i++) {
-        preamble += "var " + robot.parts[i].name + " = r.parts["+i+"];\n";
+    var preamble = "";
+
+    //Function to load the wasmoon
+    async function loadWasmoon() {
+        try {
+            console.log('Loading wasmoon module...');
+            //Load the wasmoon module
+            const { LuaFactory } = await import('https://cdn.jsdelivr.net/npm/wasmoon@1.16.0/dist/index.min.js');
+            console.log('wasmoon module loaded successfully');
+            //Return the LuaFactory class
+            return LuaFactory;
+        } catch (error) {
+            console.error('Error loading wasmoon module:', error);
+            throw error;
+        }
     }
 
-    //undefine the r parameter
-    preamble += "r = undefined;\n";
-    preamble += "async function userFunction() {\n";
+    try {
+        //Load the wasmoon module
+        const LuaFactory = await loadWasmoon();
 
-    return new Function("r", preamble + robot.code + "\n}\n  userFunction();");
+        //Reference all the robot variables inside the getRobotFunction
+        for(var i = 0; i < robot.parts.length; i++) {
+            preamble += "var " + robot.parts[i].name + " = r.parts[" + i + "];\n";
+        }
+
+        // Set JS functions to be global Lua functions
+        console.log('Setting JS functions as global Lua functions');
+        preamble += "lua.global.set('moveForward', () => forward.setPower(100));\n";
+        preamble += "lua.global.set('moveBackward', () => forward.setPower(-100));\n";
+        preamble += "lua.global.set('turnLeft', () => left.setPower(100));\n";
+        preamble += "lua.global.set('turnRight', () => right.setPower(100));\n";
+        preamble += "lua.global.set('stopMovement', () => { forward.setPower(0); left.setPower(0); right.setPower(0); });\n";
+
+        // Define a Lua function to construct the parts
+        console.log('Defining constructParts function');
+        preamble += "lua.global.set('constructParts', (parts) => {\n";
+        preamble += "  for (var i = 0; i < parts.length; i++) {\n";
+        preamble += "    var part = parts[i];\n";
+        preamble += "    if (part.type == 'Chassis') {\n";
+        preamble += "      var chassis = new Chassis(part);\n";
+        preamble += "      parts[i] = chassis;\n";
+        preamble += "    } else if (part.type == 'Motor') {\n";
+        preamble += "      var motor = new Motor(part);\n";
+        preamble += "      parts[i] = motor;\n";
+        preamble += "    } else if (part.type == 'Marker') {\n";
+        preamble += "      var marker = new Marker(part);\n";
+        preamble += "      parts[i] = marker;\n";
+        preamble += "    } else if (part.type == 'Light') {\n";
+        preamble += "      var light = new Light(part);\n";
+        preamble += "      parts[i] = light;\n";
+        preamble += "    } else if (part.type == 'LightSensor') {\n";
+        preamble += "      var lightSensor = new LightSensor(part);\n";
+        preamble += "      parts[i] = lightSensor;\n";
+        preamble += "    } else if (part.type == 'RangeSensor') {\n";
+        preamble += "      var rangeSensor = new RangeSensor(part);\n";
+        preamble += "      parts[i] = rangeSensor;\n";
+        preamble += "    } else if (part.type == 'Laser') {\n";
+        preamble += "      var laser = new Laser(part);\n";
+        preamble += "      parts[i] = laser;\n";
+        preamble += "    }\n";
+        preamble += "  }\n";
+        preamble += "});\n"; //End of Lua function definition
+
+        //Define a JavaScript function to call the Lua function
+        console.log('Defining userFunction');
+        preamble += "async function userFunction(lua) {\n"; //Pass lua as an arg
+        preamble += "  console.log('Executing user code');\n";
+        preamble += "  try {\n";
+        preamble += "    await lua.doString(`constructParts(JSON.parse('${JSON.stringify(robot.parts)}'))`);\n";
+        preamble += "    await lua.doString(`" + robot.code + "`);\n";
+        preamble += "    console.log('User code execution completed');\n";
+        preamble += "  } catch (error) {\n";
+        preamble += "    console.error('Error executing user code:', error);\n";
+        preamble += "  }\n";
+        preamble += "}\n";
+    } finally {
+        //Close the Lua environment
+        console.log('Closing Lua environment');
+        preamble += "if (lua) lua.global.close();\n"; // Close lua if it exists
+    }
+
+    console.log('getRobotFunction created');
+
+    //Wrap the preamble in an async function
+    return new Function("lua", "r", "return (async function() {\n" + preamble + "})(lua, r);"); // Pass lua and robot as arguments
 }
+
+
+
+
 
 
 function updateRobot(update) {
